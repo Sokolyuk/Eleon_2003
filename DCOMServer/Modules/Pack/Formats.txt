@@ -1,0 +1,77 @@
+CPT(command pack with task) * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ (protocol 1)(ver 1)
+[0] CPT[0]           = varInteger:(Protocol)                                            - ID протокола
+[1] CPT[1]           = varInteger:(Version)                                             - версия CP
+[2] CPT.Options      = varInteger:(Options)                                             -
+      F E D C B A 9 8'7 6 5 4 3 2 1 0
+                                  | |
+                                  | -- ?                                                  //Protocols_CPT_Options_NoResult   (0)-нужны результаты выполнения пакета (пакет разворачивается); (1)-результаты не нужны (игнорируется).
+                                  ---- ?                                                                                                                                              Protocols_CPT_Options_NoError    (0)-нужны ошибки при выполении пакета (пакет разворачивается);  (1)-ошибки при выполении пакета не нужны (игнорируется).
+[3] CPT.CPID         = varInteger:(CPID)                                             - уникальный ID конкретноко пакета команд, задается только отправителем для получателя
+[4] CPT.Tsk          = varArray:([varInteger:(TaskID)..n])                           - массив задач
+[5] CPT.Params       = varArray:([varVariant:(Params)..n])                           - массив параметров
+[6] CPT.BlockID      = varArray:([varInteger:(BlockID)..n]);                         - массив номеров блоков команд в пакете. В случаи ошибки в одной из команд блока, прерывается обработка только этого блока, а другие блоки продолжают обработку.
+                                                                                       unassigned - не применяется
+[7] CPT.RouteParams  = varArray:([varVariant:(RouteParams)..n])                      - массив путевых параметров
+                                                                                       unassigned-не применяется
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+CPR(command pack eith result) * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ (protocol 2)(ver 1)
+[0] CPR[0]           = varInteger:(Protocol)                                            - ID протокола
+[1] CPR[1]           = varInteger:(Version)                                             - версия CP
+[2] CPR.Options      = varInteger:(Options)                                             -
+      F E D C B A 9 8'7 6 5 4 3 2 1 0
+                                  | |
+                                  | -- (0)-,    (1)-;
+                                  ---- (0)- , (1)-;
+[3] CPR.CPID         = varInteger:(CPID)                                             - уникальный ID конкретноко пакета команд, задается только отправителем для получателя
+[4] CPR.Tsk          = varArray:([varInteger:(TaskID)..n])                           - массив задач
+[5] CPR.Params       = varArray:([varVariant:(Params)..n])                           - массив параметров
+[6] CPR.BlockID      = varArray:([varInteger:(BlockID)..n]);                         - массив номеров блоков команд в пакете. В случаи ошибки в одной из команд блока, прерывается обработка только этого блока, а другие блоки продолжают обработку.
+[7] CPR.Errors       = varArray:([[varInteger:(StepNum); varOleStr(ErrorText)]..n]); - массив ошибок
+[8] CPR.RouteParams  = varArray:([varVariant:(RouteParams)..n])                      - массив путевых параметров
+                                                                                       unassigned-не применяется
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+
+
+PD (place data) * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ (protocol 3)(ver 1)
+[0] PD[0]           = varInteger:(Protocol)                                         - ID протокола
+[1] PD[1]           = varInteger:(Version)                                          - версия PD
+[2] PD.Options      = varInteger:(Options)
+      F E D C B A 9 8'7 6 5 4 3 2 1 0
+                            | | | | |
+                            | | | | -- ( 1)Protocols_PD_Options_NoTransform                 (0) - во время прохождения PD.Place трансформаруется(OnUser->OnId, OnAll->OnId), тем самым изменяя путь внутри ракета. Это гарантирует обратную доставку отправителю, в противном случае возможны неожидаемое распространение пакетов; (1) - во время прохождения PD.Place не трансформаруется(OnUser, OnAll->OnId)
+                            | | | ---- ( 2)Protocols_PD_Options_WithNotificationOfError     (0) - не требуется уведомление о ошибках во время прохождения пакета; (1) - требуется уведомление о ошибках во время прохождения пакета;
+                            | | ------ ( 4)Protocols_PD_Options_WithNotificationOfDelivery  (0) - не требуется уведомление о доставке пакета по адресу; (1) - требуется уведомление.
+                            | ---------( 8)Protocols_PD_Options_WithCheckOfPassing          (0) - нет контроля(проверка) прохождения(извещение о прохождении пакета через узел); (1) - есть котроль прохождения(PD-разворачивается).
+                            -----------(16)Protocols_PD_Options_NoResult                    (0) - доставляет обратно результат выполнения(CPR); (1) - не доставляет обратно(игнорирует) результат выполнения(CPR)
+[3] PD.CurrNum      = varInteger:(CurrNum)                                          - номер элемента в массиве, которые будет выполняться
+[4] PD.Place        = varArray:([varInteger:(Place)..n])                            - код размещения результата
+[5] PD.PlaceData    = varArray:([varVariant:(PlaceData)..n])                        - данные для указанного типа размещения результатов.
+ ---
+  Case PD.Place of
+ {1}pdsEventOnID,     : PD.PlaceData = varInteger:(ASMID);
+ {5}pdsCommandOnID    : PD.PlaceData = varInteger:(ASMID);
+ {2}pdsEventOnUser,   : PD.PlaceData = varOleStr:('UserName');
+ {6}pdsCommandOnUser  : PD.PlaceData = varOleStr:('UserName');
+ {3}pdsEventOnAll,    : PD.PlaceData = Unassigned;
+ {7}pdsCommandOnAll   : PD.PlaceData = Unassigned;
+ {4}pdsEventOnBidge,  : PD.PlaceData = varInteger:(ID shop);
+ {8}pdsCommandOnBidge : PD.PlaceData = varInteger:(ID shop);
+ {9}pdsEventOnMask    : PD.PlaceData = varDouble:(Client Mask);
+ {10}pdsCommandOnMask : PD.PlaceData = varDouble:(Client Mask);
+  End;
+ ---
+[6] PD.Data         = varVariant:(Data)                                             - данные которые подаются на вход Command
+[7] PD.PDID         = varInteger Or varString or varOleStr:(Id пакета PD)
+[8] PD.Error        = varVariant:(0:varOleStr:(Error messge)                        - если Unassigned, то ошибки нет; что бы если сообщение о ошибке '' не было принято как отсутствие ошибки.
+                                  1:varVariant);                                    - пользовательская информация.
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+

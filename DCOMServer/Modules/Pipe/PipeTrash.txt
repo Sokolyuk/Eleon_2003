@@ -1,0 +1,747 @@
+==========
+unit UPipeEServer;
+
+interface
+  uses UPipeServerBase, Classes;
+type
+  TPipeMultiEServer=class(TPipeMultiServerBase)
+  protected
+    procedure InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);override;
+    procedure InternalHandCallServer(aNamedPipe:TNamedPipe);override;
+  end;
+
+  TPipeCallEServer=class(TThread)
+  private
+    FEvents:array[0..1] of THandle;
+    FMemPointer:Pointer;
+    FMemPointerSize:Cardinal;
+    FProcName, FProcParams:AnsiString;
+    FNamedPipe:TNamedPipe;
+  protected
+    procedure InternalInit;
+  protected
+    procedure InternalServerReadFromPipe;
+    procedure InternalReadComplete(aStartTime:TDateTime);
+    procedure InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);
+    procedure Execute;override;
+  public
+    constructor Create(aNamedPipe:TNamedPipe);
+    destructor Destroy;override;
+    procedure Terminate;
+    property ProcName:AnsiString read FProcName;
+    property ProcParams:AnsiString read FProcParams;
+  end;
+
+implementation
+  Uses Windows, Sysutils, UPipeServerUtils, UDataCaseConsts;
+{, UDataCaseConsts, , UTTaskTypes, Variants, UTypeUtils, UTaskTypes}
+
+// - - - TPipeMultiEServer - - -
+procedure TPipeMultiEServer.InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);
+begin
+  GL_DataCase.ITMessAdd(Now, aStartTime, Self, 'SQLServer', 'Pipe', e.Message+'/HC='+IntToStr(e.HelpContext), mecApp, mesError);
+end;
+
+procedure TPipeMultiEServer.InternalHandCallServer(aNamedPipe:TNamedPipe);
+begin
+  //Gl_DataCase.
+  //?
+  TPipeCallEServer.Create(aNamedPipe);
+end;
+
+// - - - TPipeCallEServer - - -
+procedure TPipeCallEServer.InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);
+begin
+  //GL_DataCase.ITMessAdd(Now, tmpNow, Self, '', 'Pipe', 'HC='+IntToStr(e.HelpContext)+' ErrMess='''+e.Message+'''.', mecApp, mesError);
+end;
+
+procedure TPipeCallEServer.InternalServerReadFromPipe;
+  Var tmpRet:Boolean;
+      tmpOverlapped:TOverlapped;
+      tmpOutSize:Cardinal;
+      tmpDataSize:Cardinal;
+      tmpResultString:AnsiString;
+      tmpNow:TDateTime;
+begin
+  tmpNow:=Now;
+  //Читаю заголовок(4байта)
+  Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+  tmpOverlapped.hEvent:=FEvents[0];
+  ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+  //..
+  FMemPointerSize:=0;
+  tmpDataSize:=0;
+  //grab whatever's coming through the pipe...
+  tmpRet:=ReadFile(
+              FNamedPipe.Pipe,              // file to read from
+              tmpDataSize,        // address of input buffer
+              SizeOf(tmpDataSize),// number of bytes to read
+              FMemPointerSize,    // number of bytes read
+              @tmpOverlapped);    // overlapped stuff, not needed
+  If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+    Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of   //ERROR_MORE_DATA
+      WAIT_OBJECT_0:begin//клиент сделал запись
+        //Ok.
+      end;
+      WAIT_OBJECT_0+1:begin//остановка сервера
+        Exit;
+      end;
+    else
+      Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+    end;
+  end;
+  //If FMemPointerSize=0 then continue;//если ничего не получил, значит плохие данные, читаю др.
+  If tmpDataSize>10240000{10mb}then Raise Exception.Create('tmpDataSize='+IntToStr(tmpDataSize)+'>10240000{10mb}.');
+  //читаю данные
+  GetMem(FMemPointer, tmpDataSize);//выделяю память под данные
+  try
+    Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+    tmpOverlapped.hEvent:=FEvents[0];
+    ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+    //..
+    FMemPointerSize:=0;
+    //grab whatever's coming through the pipe...
+    tmpRet:=ReadFile(
+                FNamedPipe.Pipe,            // file to read from
+                FMemPointer^,     // address of input buffer
+                tmpDataSize,      // number of bytes to read
+                FMemPointerSize,  // number of bytes read
+                @tmpOverlapped);  // overlapped stuff, not needed
+    If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+      Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+        WAIT_OBJECT_0:begin//клиент сделал запись
+          //Ok.
+        end;
+        WAIT_OBJECT_0+1:begin//остановка сервера
+          Exit;
+        end;
+      else
+        Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+      end;
+    end;
+    //..
+     If FMemPointerSize=0 then Exit;//если ничего не получил, значит плохие данные, читаю др.
+    //..
+    try
+      tmpResultString:='';//no error
+      InternalReadComplete(tmpNow);//обрабатываю полученные данные
+    except on e:exception do begin
+      tmpResultString:=psuIntegerToString(e.helpcontext)+tmpResultString+e.message;
+    end;end;
+    tmpResultString:=psuIntegerToString(Length(tmpResultString))+tmpResultString;
+  finally
+    FreeMem(FMemPointer);
+    FMemPointer:=Nil;
+  end;
+  //..
+  Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+  tmpOverlapped.hEvent:=FEvents[0];
+  ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+  // send it back out...
+  tmpRet:=WriteFile(
+              FNamedPipe.Pipe,                    // file to write to
+              PChar(tmpResultString)^,  // address of output buffer
+              Length(tmpResultString),  // number of bytes to write
+              tmpOutSize,               // number of bytes written
+              @tmpOverlapped);          // overlapped stuff, not needed
+  If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+    Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+      WAIT_OBJECT_0:begin//клиент сделал запись
+        //Ok.
+      end;
+      WAIT_OBJECT_0+1:begin//остановка сервера
+        Exit;
+      end;
+    else
+      Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+    end;
+  end;
+end;
+
+procedure TPipeCallEServer.InternalReadComplete(aStartTime:TDateTime);
+  var tmpPointer:Pointer;
+begin
+  if (FMemPointerSize=0)Or(Not Assigned(FMemPointer)) then Raise Exception.Create('Invalid call-params.');;
+  FProcName:=PChar(FMemPointer);
+  SetLength(FProcParams, Integer(FMemPointerSize)-Length(FProcName)-1);
+  tmpPointer:=Pointer(Cardinal(Length(FProcName))+Cardinal(FMemPointer)+1);
+  Move(tmpPointer^, PChar(FProcParams)^, Length(FProcParams));
+  //GL_DataCase.ITMateTaskAdd(tskMTExecServerProc, VarArrayOf([FProcName, glStringToVarArray(FProcParams)]), Unassigned, cnSQLServerSecurityContext);
+  //If Assigned(FOnCompleteRead) Then Synchronize(FOnCompleteRead);
+  //PipeCallEServer:=self;
+  //Synchronize(Form1.add);
+  InterlockedIncrement(cncll);
+  FProcParams:='';
+  FProcName:='';
+end;
+
+//* * * TPipeCallServerBase * * *
+constructor TPipeCallEServer.Create(aNamedPipe:TNamedPipe);
+begin
+  FNamedPipe:=aNamedPipe;
+  FillChar(FEvents, Sizeof(FEvents), 0);
+  FMemPointer:=Nil;
+  FMemPointerSize:=0;
+  InternalInit;
+  FreeOnTerminate:=true;
+  inherited Create(False);
+  InterlockedIncrement(cnPipeCallServerCount);
+end;
+
+destructor TPipeCallEServer.Destroy;
+begin
+  CloseHandle(FEvents[0]);
+  CloseHandle(FEvents[1]);
+  FNamedPipe.free;
+  FNamedPipe:=Nil;
+  inherited Destroy;
+  InterlockedDecrement(cnPipeCallServerCount);
+end;
+
+procedure TPipeCallEServer.Terminate;
+begin
+  SetEvent(FEvents[1]);
+  Inherited Terminate;
+end;
+
+procedure TPipeCallEServer.InternalInit;
+  var tmpEvent:THandle;
+begin
+  //Создаю событие для Connect/Read/Write
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[0]:=tmpEvent;
+  //Создаю событие для Terminate
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[1]:=tmpEvent;
+end;
+
+procedure TPipeCallEServer.Execute;
+  Var tmpNow:TDateTime;
+begin
+  tmpNow:=Now;
+  try
+    InternalServerReadFromPipe;
+  Except On e:exception Do Begin
+    InternalSetMessErr(tmpNow, e.Message, e.HelpContext);
+    Sleep(100);
+  End;End;
+end;
+
+end.
+
+
+
+============
+
+unit UPipeEServer;
+
+interface
+  uses UPipeServerBase;
+type
+  TPipeMultiEServer=class(TPipeMultiServerBase)
+  protected
+    procedure InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);override;
+    procedure InternalHandCallServer(aNamedPipe:TNamedPipe);override;
+  end;
+
+  TPipeCallEServer=class(TPipeCallServerBase)
+  private
+    FProcName, FProcParams:AnsiString;
+  protected
+    procedure InternalServerReadFromPipe;override;
+    procedure InternalReadComplete(aStartTime:TDateTime);
+    procedure InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);override;
+  public
+    property ProcName:AnsiString read FProcName;
+    property ProcParams:AnsiString read FProcParams;
+  end;
+
+var cncll:integer=0;
+
+implementation
+  Uses Windows, Sysutils, UPipeServerUtils, Classes, USrvPipe;
+{, UDataCaseConsts, UConsts, UTTaskTypes, Variants, UTypeUtils, UTaskTypes}
+
+// - - - TPipeMultiEServer - - -
+procedure TPipeMultiEServer.InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);
+begin
+  //GL_DataCase.ITMessAdd(Now, tmpNow, Self, '', 'Pipe', 'HC='+IntToStr(e.HelpContext)+' ErrMess='''+e.Message+'''.', mecApp, mesError);
+end;
+
+procedure TPipeMultiEServer.InternalHandCallServer(aNamedPipe:TNamedPipe);
+begin
+  Gl_DataCase.
+  ?
+  //TPipeCallEServer.Create(aPipe);
+end;
+
+// - - - TPipeCallEServer - - -
+(*procedure TPipeCallEServer.InternalSetMessErr(aStartTime:TDateTime; Const aMessage:AnsiString; aHelpContext:Integer);
+begin
+  //GL_DataCase.ITMessAdd(Now, tmpNow, Self, '', 'Pipe', 'HC='+IntToStr(e.HelpContext)+' ErrMess='''+e.Message+'''.', mecApp, mesError);
+end;
+
+procedure TPipeCallEServer.InternalServerReadFromPipe;
+  Var tmpRet:Boolean;
+      tmpOverlapped:TOverlapped;
+      tmpOutSize:Cardinal;
+      tmpDataSize:Cardinal;
+      tmpResultString:AnsiString;
+      tmpNow:TDateTime;
+begin
+  tmpNow:=Now;
+  //Читаю заголовок(4байта)
+  Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+  tmpOverlapped.hEvent:=FEvents[0];
+  ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+  //..
+  FMemPointerSize:=0;
+  tmpDataSize:=0;
+  //grab whatever's coming through the pipe...
+  tmpRet:=ReadFile(
+              FPipe,              // file to read from
+              tmpDataSize,        // address of input buffer
+              SizeOf(tmpDataSize),// number of bytes to read
+              FMemPointerSize,    // number of bytes read
+              @tmpOverlapped);    // overlapped stuff, not needed
+  If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+    Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of   //ERROR_MORE_DATA
+      WAIT_OBJECT_0:begin//клиент сделал запись
+        //Ok.
+      end;
+      WAIT_OBJECT_0+1:begin//остановка сервера
+        Exit;
+      end;
+    else
+      Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+    end;
+  end;
+  //If FMemPointerSize=0 then continue;//если ничего не получил, значит плохие данные, читаю др.
+  If tmpDataSize>10240000{10mb}then Raise Exception.Create('tmpDataSize='+IntToStr(tmpDataSize)+'>10240000{10mb}.');
+  //читаю данные
+  GetMem(FMemPointer, tmpDataSize);//выделяю память под данные
+  try
+    Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+    tmpOverlapped.hEvent:=FEvents[0];
+    ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+    //..
+    FMemPointerSize:=0;
+    //grab whatever's coming through the pipe...
+    tmpRet:=ReadFile(
+                FPipe,            // file to read from
+                FMemPointer^,     // address of input buffer
+                tmpDataSize,      // number of bytes to read
+                FMemPointerSize,  // number of bytes read
+                @tmpOverlapped);  // overlapped stuff, not needed
+    If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+      Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+        WAIT_OBJECT_0:begin//клиент сделал запись
+          //Ok.
+        end;
+        WAIT_OBJECT_0+1:begin//остановка сервера
+          Exit;
+        end;
+      else
+        Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+      end;
+    end;
+    //..
+     If FMemPointerSize=0 then Exit;//если ничего не получил, значит плохие данные, читаю др.
+    //..
+    try
+      tmpResultString:='';//no error
+      InternalReadComplete(tmpNow);//обрабатываю полученные данные
+    except on e:exception do begin
+      tmpResultString:=psuIntegerToString(e.helpcontext)+tmpResultString+e.message;
+    end;end;
+    tmpResultString:=psuIntegerToString(Length(tmpResultString))+tmpResultString;
+  finally
+    FreeMem(FMemPointer);
+    FMemPointer:=Nil;
+  end;
+  //..
+  Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+  tmpOverlapped.hEvent:=FEvents[0];
+  ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+  // send it back out...
+  tmpRet:=WriteFile(
+              FPipe,                    // file to write to
+              PChar(tmpResultString)^,  // address of output buffer
+              Length(tmpResultString),  // number of bytes to write
+              tmpOutSize,               // number of bytes written
+              @tmpOverlapped);          // overlapped stuff, not needed
+  If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+    Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+      WAIT_OBJECT_0:begin//клиент сделал запись
+        //Ok.
+      end;
+      WAIT_OBJECT_0+1:begin//остановка сервера
+        Exit;
+      end;
+    else
+      Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+    end;
+  end;
+end;
+
+procedure TPipeCallEServer.InternalReadComplete(aStartTime:TDateTime);
+  var tmpPointer:Pointer;
+begin
+  if (FMemPointerSize=0)Or(Not Assigned(FMemPointer)) then Raise Exception.Create('Invalid call-params.');;
+  FProcName:=PChar(FMemPointer);
+  SetLength(FProcParams, Integer(FMemPointerSize)-Length(FProcName)-1);
+  tmpPointer:=Pointer(Cardinal(Length(FProcName))+Cardinal(FMemPointer)+1);
+  Move(tmpPointer^, PChar(FProcParams)^, Length(FProcParams));
+  //GL_DataCase.ITMateTaskAdd(tskMTExecServerProc, VarArrayOf([FProcName, glStringToVarArray(FProcParams)]), Unassigned, cnSQLServerSecurityContext);
+  //If Assigned(FOnCompleteRead) Then Synchronize(FOnCompleteRead);
+  PipeCallEServer:=self;
+  //Synchronize(Form1.add);
+  InterlockedIncrement(cncll);
+  FProcParams:='';
+  FProcName:='';
+end;(**)
+
+end.
+1
+//* * * TPipeCallServerBase * * *
+constructor TPipeCallServerBase.Create(aPipe:THandle{; aOnCompleteRead:TOnCompleteReadEvent});
+begin
+  //FOnCompleteRead:=aOnCompleteRead;
+  FPipe:=aPipe;
+  FillChar(FEvents, Sizeof(FEvents), 0);
+  FMemPointer:=Nil;
+  FMemPointerSize:=0;
+  InternalInit;
+  FreeOnTerminate:=true;
+  inherited Create(False);
+  InterlockedIncrement(cnPipeCallServerCount);
+end;
+
+destructor TPipeCallServerBase.Destroy;
+begin
+  CloseHandle(FEvents[0]);
+  CloseHandle(FEvents[1]);
+  ?CloseHandle(FPipe);
+  ?FPipe:=0;
+  inherited Destroy;
+  InterlockedDecrement(cnPipeCallServerCount);
+end;
+
+procedure TPipeCallServerBase.Terminate;
+begin
+  SetEvent(FEvents[1]);
+  Inherited Terminate;
+end;
+
+procedure TPipeCallServerBase.InternalInit;
+  var tmpEvent:THandle;
+begin
+  //Создаю событие для Connect/Read/Write
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[0]:=tmpEvent;
+  //Создаю событие для Terminate
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[1]:=tmpEvent;
+end;
+
+procedure TPipeCallServerBase.Execute;
+  Var tmpNow:TDateTime;
+begin
+  tmpNow:=Now;
+  try
+    try
+      InternalServerReadFromPipe;
+    finally
+      FlushFileBuffers(FPipe);
+      DisconnectNamedPipe(FPipe);
+    end;
+  Except On e:exception Do Begin
+    InternalSetMessErr(tmpNow, e.Message, e.HelpContext);
+    Sleep(100);
+  End;End;
+end;
+
+
+
+unit UPipeServer;
+
+interface
+  uses Classes, Windows;
+
+type
+  TPipeServer=class(TThread)
+  private
+    FPipeName:AnsiString;
+    FEvents:array[0..1] of THandle;
+    FPipe:THandle;
+    FMemPointer:Pointer;
+    FMemPointerSize:DWORD;
+  protected
+    procedure InternalInit;
+    procedure Execute; override;
+    procedure InternalServerProcAsync;
+  public
+    constructor Create(CreateSuspended:Boolean; Const aPipeName:AnsiString);
+    destructor Destroy; override;
+    procedure Terminate; //reintroduce;
+    property MemPointer:Pointer read FMemPointer;
+    property MemPointerSize:DWORD read FMemPointerSize;
+  end;
+
+implementation
+  Uses SysUtils, UDataCaseConsts, UConsts, UTTaskTypes, Variants, UTypeUtils, UTaskTypes;
+
+constructor TPipeServer.Create(CreateSuspended:Boolean; Const aPipeName:AnsiString);
+begin
+  FPipeName:=aPipeName;
+  FillChar(FEvents, Sizeof(FEvents), 0);
+  FMemPointer:=Nil;
+  FMemPointerSize:=0;
+  InternalInit;
+  inherited Create(CreateSuspended);
+end;
+
+destructor TPipeServer.Destroy;
+begin
+  CloseHandle(FEvents[0]);
+  CloseHandle(FEvents[1]);
+  CloseHandle(FPipe);
+  FPipeName:='';
+  inherited Destroy;
+end;
+
+procedure TPipeServer.Terminate;
+begin
+  SetEvent(FEvents[1]);
+  Inherited Terminate;
+end;
+
+procedure TPipeServer.InternalInit;
+  var tmpEvent, tmpPipe:THandle;
+begin
+  //Создаю событие для Connect/Read/Write
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[0]:=tmpEvent;
+  //Создаю событие для Terminate
+  tmpEvent:=CreateEvent(
+         Nil,     // no security attribute
+         TRUE,    // manual-reset event
+         TRUE,    // initial state = signaled
+         Nil);    // unnamed event object
+  If tmpEvent=0 Then Raise Exception.Create('tmpEvents=0');
+  ResetEvent(tmpEvent);
+  FEvents[1]:=tmpEvent;
+  //..
+  tmpPipe:=CreateNamedPipe(
+         PChar(FPipeName),        // pipe name
+         PIPE_ACCESS_DUPLEX Or    // read/write access
+         FILE_FLAG_OVERLAPPED,    // overlapped mode
+         PIPE_TYPE_MESSAGE Or     // message-type pipe
+         PIPE_READMODE_MESSAGE Or // message-read mode
+         PIPE_WAIT,               // blocking mode
+         PIPE_UNLIMITED_INSTANCES{1},                       // number of instances
+         0,                       // output buffer size
+         0,                       // input buffer size
+         5000,                    // client time-out
+         Nil);                    // no security attributes
+  If tmpPipe=INVALID_HANDLE_VALUE then Raise Exception.Create('tmpPipe=INVALID_HANDLE_VALUE. Не удается создать Pipe='''+FPipeName+''', возможно он уже создан.');
+  FPipe:=tmpPipe;
+end;
+
+procedure TPipeServer.InternalServerProcAsync;
+  var tmpProcName, tmpProcParams:AnsiString;
+      tmpPointer:Pointer;
+begin
+    if (FMemPointerSize=0)Or(Not Assigned(FMemPointer)) then Raise Exception.Create('Invalid call-params.');;
+    tmpProcName:=PChar(FMemPointer);
+    SetLength(tmpProcParams, Integer(FMemPointerSize)-Length(tmpProcName)-1);
+    tmpPointer:=Pointer(Cardinal(Length(tmpProcName))+Cardinal(FMemPointer)+1);
+    Move(tmpPointer^, PChar(tmpProcParams)^, Length(tmpProcParams));
+    GL_DataCase.ITMateTaskAdd(tskMTExecServerProc, VarArrayOf([tmpProcName, glStringToVarArray(tmpProcParams)]), Unassigned, cnSQLServerSecurityContext);
+    tmpProcParams:='';
+    tmpProcName:='';
+end;
+
+procedure TPipeServer.Execute;
+  function localIntegerConvertToString(aInteger:Integer):AnsiString;
+    var ltmpI:Integer;
+        ltmpByte:byte;
+  begin
+    Result:='';
+    For ltmpI:=0 to 3 do begin
+      ltmpByte:=(aInteger shr (ltmpI*8)) and $000000FF;
+      Result:=Result+Chr(ltmpByte);
+    end;
+  end;
+  Var tmpGetLastError:Cardinal;
+      tmpRet:Boolean;
+      tmpOverlapped:TOverlapped;
+      tmpOutSize:Cardinal;
+      tmpDataSize:Cardinal;
+      tmpResultString:AnsiString;
+      tmpNow:TDateTime;
+begin
+  While Not Terminated do begin
+    tmpNow:=Now;
+    try
+      Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+      tmpOverlapped.hEvent:=FEvents[0];
+      ResetEvent(FEvents[0]);
+      //..
+      If ConnectNamedPipe(FPipe, @tmpOverlapped) then Raise Exception.Create('ConnectNamedPipe should return false.');//Соединяюсь с клиентом
+      tmpGetLastError:=GetLastError;
+      Case tmpGetLastError of
+        ERROR_IO_PENDING:;//Ok
+        ERROR_PIPE_CONNECTED:SetEvent(FEvents[0]);//Соединился, дергаю событие
+      else
+        Raise Exception.Create('ConnectNamedPipe: '+SysErrorMessage(tmpGetLastError));
+      end;
+      //..
+      try
+        Case WaitForMultipleObjects(2, @FEvents, False, INFINITE) of //Жду пока кто-нибудь соединится или поступит событие остановки сервера.
+          WAIT_OBJECT_0:begin//появился клиент
+            //Ok.
+          end;
+          WAIT_OBJECT_0+1:begin//остановка сервера
+            break;
+          end;
+        else
+          Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+        end;
+        //Читаю заголовок(4байта)
+        Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+        tmpOverlapped.hEvent:=FEvents[0];
+        ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+        //..
+        FMemPointerSize:=0;
+        tmpDataSize:=0;
+        //grab whatever's coming through the pipe...
+        tmpRet:=ReadFile(
+                    FPipe,              // file to read from
+                    tmpDataSize,        // address of input buffer
+                    SizeOf(tmpDataSize),// number of bytes to read
+                    FMemPointerSize,    // number of bytes read
+                    @tmpOverlapped);    // overlapped stuff, not needed
+        If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+          Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of   //ERROR_MORE_DATA
+            WAIT_OBJECT_0:begin//клиент сделал запись
+              //Ok.
+            end;
+            WAIT_OBJECT_0+1:begin//остановка сервера
+              break;
+            end;
+          else
+            Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+          end;
+        end;
+        //If FMemPointerSize=0 then continue;//если ничего не получил, значит плохие данные, читаю др.
+        If tmpDataSize>10240000{10mb}then Raise Exception.Create('tmpDataSize='+IntToStr(tmpDataSize)+'>10240000{10mb}.');
+        //читаю данные
+        GetMem(FMemPointer, tmpDataSize);//выделяю память под данные
+        try
+          Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+          tmpOverlapped.hEvent:=FEvents[0];
+          ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+          //..
+          FMemPointerSize:=0;
+          //grab whatever's coming through the pipe...
+          tmpRet:=ReadFile(
+                      FPipe,            // file to read from
+                      FMemPointer^,     // address of input buffer
+                      tmpDataSize,      // number of bytes to read
+                      FMemPointerSize,  // number of bytes read
+                      @tmpOverlapped);  // overlapped stuff, not needed
+          If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+            Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+              WAIT_OBJECT_0:begin//клиент сделал запись
+                //Ok.
+              end;
+              WAIT_OBJECT_0+1:begin//остановка сервера
+                break;
+              end;
+            else
+              Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+            end;
+          end;
+          //..
+           If FMemPointerSize=0 then continue;//если ничего не получил, значит плохие данные, читаю др.
+          //..
+          try
+            tmpResultString:='';//no error
+            InternalServerProcAsync;//обрабатываю полученные данные
+          except
+            on e:exception do begin
+              tmpResultString:=localIntegerConvertToString(e.helpcontext)+tmpResultString+e.message;
+            end;
+          end;
+          tmpResultString:=localIntegerConvertToString(Length(tmpResultString))+tmpResultString;
+        finally
+          FreeMem(FMemPointer);
+          FMemPointer:=Nil;
+        end;
+        //..
+        Fillchar(tmpOverlapped, Sizeof(tmpOverlapped), 0);
+        tmpOverlapped.hEvent:=FEvents[0];
+        ResetEvent(FEvents[0]);//Ставлю флаг клиента обратно в 0.
+        // send it back out...
+        tmpRet:=WriteFile(
+                    FPipe,                    // file to write to
+                    PChar(tmpResultString)^,  // address of output buffer
+                    Length(tmpResultString),  // number of bytes to write
+                    tmpOutSize,               // number of bytes written
+                    @tmpOverlapped);          // overlapped stuff, not needed
+        If (Not tmpRet)And(GetLastError=ERROR_IO_PENDING) Then begin
+          Case WaitForMultipleObjects(2, @FEvents, FALSE, INFINITE ) of
+            WAIT_OBJECT_0:begin//клиент сделал запись
+              //Ok.
+            end;
+            WAIT_OBJECT_0+1:begin//остановка сервера
+              break;
+            end;
+          else
+            Raise Exception.Create('Unknown result of WaitForMultipleObjects.');
+          end;
+        end;
+      finally
+        DisconnectNamedPipe(FPipe);
+      end;
+    except
+      on e:exception do begin
+        GL_DataCase.ITMessAdd(Now, tmpNow, Self, '', 'Pipe', 'HC='+IntToStr(e.HelpContext)+' ErrMess='''+e.Message+'''.', mecApp, mesError);
+        sleep(100);
+      end;
+    end;
+  end;
+end;
+
+end.

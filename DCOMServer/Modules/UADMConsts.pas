@@ -1,0 +1,78 @@
+//Copyright © 2000-2003 by Dmitry A. Sokolyuk
+unit UADMConsts;
+
+interface
+
+ResourceString
+  cstskADMNone='tskADMNone';
+  cstskADMGetAbout='tskADMGetAbout';
+  cstskADMGetNewMess='tskADMGetNewMess';
+  cstskADMGetASMServers='tskADMGetASMServers';
+  cstskADMGetSummJurnal='tskADMGetSummJurnal';
+  cstskADMStopASMOnID='tskADMStopASMOnID';
+  cstskADMStopASMOnUser='tskADMStopASMOnUser';
+  cstskADMStopASMAll='tskADMStopASMAll';
+  cstskADMGetServerLockStatus='tskADMGetServerLockStatus';
+  cstskADMServerLock='tskADMServerLock';
+  cstskADMServerUnlock='tskADMServerUnlock';
+  cstskADMSendMessToId='tskADMSendMessToId';
+  cstskADMSendMessToUser='tskADMSendMessToUser';
+  cstskADMSendMessToAll='tskADMSendMessToAll';
+  cstskADMCodeOfMateTeam='skADMCodeOfMateTeam';
+  cstskADMShotDownServer='tskADMShotDownServer';
+  cstskADMMessage='tskADMMessage';
+  cstskADMCancelTask='tskADMCancelTask';
+  cstskADMIgnoreTaskAdd='tskADMIgnoreTaskAdd';
+  cstskADMIgnoreTaskCancel='tskADMIgnoreTaskCancel';
+  cstskADMPack='tskADMPack';
+  cstskADMSendSaleBlockSQL='tskADMSendSaleBlockSQL';
+  cstskADMBlockSQL='tskADMBlockSQL';
+  cstskADMReloadSecurity='tskADMReloadSecurity';
+  cstskADMReloadInternalConfig='tskADMReloadInternalConfig';
+  cstskADMSendMessToMask='tskADMSendMessToMask';
+  cstskADMSendPackToId='tskADMSendPackToId';
+  cstskADMSendPackToUser='tskADMSendPackToUser';
+  cstskADMSendPackToMask='tskADMSendPackToMask';
+  cstskADMSendPackToAll='tskADMSendPackToAll';
+  cstskADMSetLockList='tskADMSetLockList';
+  cstskADMGetLockList='tskADMGetLockList';
+  cstskADMClearLockOwner='tskADMClearLockOwner';
+  cstskADMRunServerProc='tskADMRunServerProc';
+  cstskADMCPT='tskADMCPT';
+  cstskADMCPR='tskADMCPR';
+  cstskADMPD='tskADMPD';
+  cstskADMExecMT='tskADMExecMT';
+  cstskADMGetOnlineStatus='tskADMGetOnlineStatus';
+  cstskADMGetOnlineMode='tskADMGetOnlineMode';
+  cstskADMSetOnlineMode='tskADMSetOnlineMode';
+  cstskADMSetOnline='tskADMSetOnline';
+  cstskADMSetOffline='tskADMSetOffline';
+  cstskADMGetBridgeCount='tskADMGetBridgeCount';
+  cstskADMCreateBridge='tskADMCreateBridge';
+  cstskADMDeleteBridge='tskADMDeleteBridge';
+  cstskADMAddToClientQueue='tskADMAddToClientQueue';
+  cstskADMExecServerProc='tskADMExecServerProc';
+  cstskADMClearRePDOfClientID='tskADMClearRePDOfClientID';
+  //cstskADMBfCheckActuality='tskADMBfCheckActuality';
+  //cstskADMBfBeginDownload='tskADMBfBeginDownload';
+  //cstskADMBfDownload='tskADMBfDownload';
+  //cstskADMBfEndDownload='tskADMBfEndDownload';
+  //cstskADMBfBeginUpload='tskADMBfBeginUpload';
+  //cstskADMBfUpload='tskADMBfUpload';
+  //cstskADMBfEndUpload='tskADMBfEndUpload';
+  //cstskADMBfTransferCancel='tskADMBfTransferCancel';
+  //cstskADMBfAddTransferDownload='tskADMBfAddTransferDownload';
+  //cstskADMBfAddTransferUpload='tskADMBfAddTransferUpload';
+  //cstskADMBfExists='tskADMBfExists';
+  //cstskADMBfLocalDelete='tskADMBfLocalDelete';
+  //cstskADMBfTransferTerminateByBfName='tskADMBfTransferTerminateByBfName';
+  //cstskADMBfTransferTerminate='tskADMBfTransferTerminate';
+  //cstskADMBfTransferTerminated='tskADMBfTransferTerminated';
+  //cstskADMBfTransferCanceled='tskADMBfTransferCanceled';
+  cstskADMPackIsLost='tskADMPackIsLost';
+  cstskADMEQueryInterface='tskADMEQueryInterface';
+  cstskADMEQueryInterfaceByLevel='tskADMEQueryInterfaceByLevel';
+  cstskADMEQueryInterfaceByNodeName='tskADMEQueryInterfaceByNodeName';
+
+implementation
+end.

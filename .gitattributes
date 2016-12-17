@@ -15,3 +15,6 @@
 *.PDF	 diff=astextplain
 *.rtf	 diff=astextplain
 *.RTF	 diff=astextplain
+*.pas encoding=cp1251
+*.inc encoding=cp1251
+*.txt encoding=cp1251
